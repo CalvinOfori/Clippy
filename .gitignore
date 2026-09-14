@@ -1,0 +1,16 @@
+# Python environment
+.venv/
+__pycache__/
+*.pyc
+
+# Local app data & media
+chat_histories/
+staged_assets/
+*.mp4
+*.mov
+*.jpg
+*.png
+
+# Secrets (Just in case you add an API key later)
+.env
+
