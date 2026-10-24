@@ -26,10 +26,12 @@ def _load_logo_b64() -> str | None:
     return None
 
 # 2. IMPORT YOUR ACTUAL AGENT
+AGENT_IMPORT_ERROR = None
 try:
     from post_production_agent import agent
-except ImportError:
+except Exception as _e:  # show the REAL reason (missing package, missing API key, ...)
     agent = None
+    AGENT_IMPORT_ERROR = f"{type(_e).__name__}: {_e}"
 
 st.set_page_config(page_title="Clippy — AI Post-Production", page_icon="✨", layout="wide", initial_sidebar_state="expanded")
 
@@ -40,12 +42,6 @@ st.markdown("""
 html, body, [class*="css"] { font-family: 'Plus Jakarta Sans', sans-serif; }
 html, body { background-color: #0d1110 !important; min-height: 100vh; }
 .stApp { background: radial-gradient(circle at 50% 38%, rgba(16, 185, 129, 0.12) 0%, rgba(6, 78, 59, 0.05) 30%, #0d1110 75%); background-color: #0d1110; background-attachment: fixed; min-height: 100vh; color: #f1f5f9; }
-/* FIX: only hide Streamlit's footer branding, not the header — the header
-   contains the sidebar collapse/expand toggle button. Hiding the whole
-   header (as the previous version did with "header, footer { visibility:
-   hidden; }") removes that toggle entirely, so if the sidebar ever
-   collapses there's no way to bring it back. Making the header transparent
-   keeps the clean look without losing the control. */
 footer { visibility: hidden; }
 header[data-testid="stHeader"] { background: transparent; }
 ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -72,10 +68,6 @@ div[data-testid="stChatInput"] textarea::placeholder { color: #6ee7b7 !important
 div[data-testid="stSidebar"] { background-color: #0b0f0e !important; border-right: 1px solid rgba(16, 185, 129, 0.15) !important; }
 .stChatMessage { background-color: rgba(19, 26, 23, 0.45) !important; border: 1px solid rgba(255, 255, 255, 0.05) !important; border-radius: 18px !important; margin-bottom: 0.75rem !important; backdrop-filter: blur(6px); }
 
-/* Claude-style sidebar chat list: plain text rows, subtle hover, active
-   chat gets a soft highlight. We use Streamlit's own primary/secondary
-   button types to distinguish active vs inactive rows, then restyle both
-   so they look like flat list rows instead of buttons. */
 section[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] button[kind="secondary"] {
     background: transparent !important;
     border: none !important;
@@ -107,9 +99,6 @@ section[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] button[kind=
 
 
 def _chat_title_from_file(path: Path) -> str:
-    """Claude-style title: derive from the first user message instead of
-    showing a raw timestamp filename. Falls back to 'New chat' if empty
-    or unreadable."""
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -128,7 +117,7 @@ if "session_id" not in st.session_state:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "active_draft" not in st.session_state:
-    st.session_state.active_draft = "Nothing_Phone_Short"
+    st.session_state.active_draft = ""
 
 # Ensure the active session always has a file on disk to populate the sidebar
 active_file_path = HISTORY_DIR / f"{st.session_state.session_id}.json"
@@ -206,8 +195,10 @@ with st.sidebar:
     st.markdown("---")
 
     with st.expander("⚙️ Agent Settings"):
-        st.markdown("**Active CapCut Draft**")
-        st.session_state.active_draft = st.text_input("Project Name", value=st.session_state.active_draft, label_visibility="collapsed")
+        st.markdown("**New draft name (optional)**")
+        st.session_state.active_draft = st.text_input(
+            "Draft name", value=st.session_state.active_draft,
+            placeholder="Leave empty - Clippy names it", label_visibility="collapsed")
 
         st.markdown("**Media Staging**")
         uploaded_images = st.file_uploader("Reference Keyframes", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
@@ -222,8 +213,8 @@ with st.sidebar:
             st.success(f"{len(staged_image_paths)} image(s) staged.")
 
         st.markdown("**Engine Config**")
-        st.selectbox("Bedrock Model", ["amazon.nova-reel-v1:0"], index=0)
-        st.selectbox("Reasoning Engine", ["amazon.nova-pro-v1:0"], index=0)
+        st.selectbox("Vision Model", ["meta/llama-3.2-11b-vision-instruct"], index=0)
+        st.selectbox("Reasoning Engine", ["meta/llama-3.1-8b-instruct", "meta/llama-3.1-70b-instruct"], index=0)
 
 # 6. MAIN CHAT & HERO DISPLAY
 if not st.session_state.messages:
@@ -272,13 +263,15 @@ if prompt:
 
     with st.chat_message("assistant", avatar="✨"):
         if agent is None:
-            err_msg = "⚠️ `agent` could not be imported from `post_production_agent.py`. Please check your agent instance name."
+            err_msg = f"⚠️ `agent` could not be imported from `post_production_agent.py`.\n\n`{AGENT_IMPORT_ERROR}`"
             st.error(err_msg)
             st.session_state.messages.append({"role": "assistant", "content": err_msg})
         else:
             with st.spinner("Clippy is working on your timeline..."):
                 try:
                     augmented_prompt = prompt
+                    if st.session_state.active_draft.strip():
+                        augmented_prompt += f"\n[Use draft name: {st.session_state.active_draft.strip()}]"
                     if staged_image_paths:
                         augmented_prompt += f"\n[Staged Images: {staged_image_paths}]"
 
